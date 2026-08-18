@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════
+     AI PERSONAL FINANCE COACH — AI.html (LLM Chat Assistant)
+     Served by server.ipynb at http://localhost:8000/AI.html
+     · Streams POST /api/chat NDJSON events:
+         {"type":"status","key":"searching"} → shows the required “Searching…”
+         {"type":"token","text":…}           → streamed into the answer bubble
+         {"type":"done"} / {"type":"error"}
+     · Voice input: mic button → MediaRecorder → POST /api/stt (Whisper) →
+       transcript inserted into the input box (never auto-sent)
+     · Conversation persisted in sessionStorage · abortable streaming
+     · Same shared bootstrap as all pages: theme (pfc_theme_v1), language
+       (pfc_lang), session (pfc_token), full fa/en + RTL
+     ═══════════════════════════════════════════════════════════════════ -->
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fiscora — AI Chat</title>
+<script>
+(function () {                                  /* paint-blocking theme + language */
+  try {
+    var t = JSON.parse(localStorage.getItem('pfc_theme_v1') || '{}');
+    if (t.primary) document.documentElement.style.setProperty('--primary', t.primary);
+    if (t.accent)  document.documentElement.style.setProperty('--accent',  t.accent);
+    var lang = localStorage.getItem('pfc_lang') || 'en';
+    document.documentElement.lang = lang;
+    document.documentElement.dir = (lang === 'fa') ? 'rtl' : 'ltr';
+    var fs = localStorage.getItem('pfc_fontsize') || 'md';
+    document.documentElement.setAttribute('data-fontsize', fs);
+  } catch (e) { /* first visit */ }
+})();
+</script>
+<link rel="stylesheet" href="style.css">
+<style>
+/* page-scoped styles only — the design system lives in style.css */
+.chat-topbar { display: flex; align-items: center; gap: var(--sp-3); padding-block: 0 var(--sp-3); }
+.chat-topbar h1 {
+  margin: 0; font-family: var(--font-brand); font-weight: 400;
+  font-size: var(--fs-lg); letter-spacing: 0.24em; text-transform: uppercase;
+}
+html[lang="fa"] .chat-topbar h1 { font-family: var(--font-fa); letter-spacing: 0; text-transform: none; font-weight: 800; }
+.ai-face {
+  width: 42px; height: 42px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 11px), calc(100% - 11px) 100%, 0 100%);
+  background: var(--metal-face); display: grid; place-items: center;
+  color: var(--on-brand); font-size: 1.2rem;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+}
+.bubble .md b { font-weight: 700; }
+.bubble .md code { font-family: ui-monospace, monospace; font-size: 0.88em;
+  background: rgba(255,255,255,0.09); padding: 1px 6px; border-radius: 6px; }
+.bubble.streaming::after { content: '▍'; color: var(--accent); animation: caret-blink 0.9s step-end infinite; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+.mic-hint { font-size: var(--fs-xs); color: var(--ink-faint); text-align: center; padding-top: var(--sp-2); min-height: 1.4em; }
+.chat-scroll { padding-bottom: var(--sp-4); }
+.voice-spinner { position: absolute; inset: 0; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg-0) 55%, transparent); border-radius: inherit; }
+
+
+/* Fiscora logo — the only page-level visual addition */
+.brand-logo[data-brand-logo] {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.fiscora-mark {
+  display: block;
+  width: 74%;
+  height: 74%;
+  filter: drop-shadow(0 0 5px var(--primary-glow)) drop-shadow(0 1px 1px rgba(0,0,0,.55));
+}
+.fiscora-mark__letter {
+  fill: none;
+  stroke: var(--primary-strong);
+  stroke-width: 5.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fiscora-mark__trend,
+.fiscora-mark__arrow {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+</style>
+</head>
+<body class="has-bottom-nav">
+
+<header class="app-header">
+  <div class="container">
+    <nav class="nav-links">
+      <a class="nav-link" href="index.html" data-i18n="nav_dashboard">Dashboard</a>
+      <a class="nav-link" href="bitcoin.html" data-i18n="nav_bitcoin">Bitcoin</a>
+      <a class="nav-link active" href="AI.html" data-i18n="nav_ai">AI Chat</a>
+    </nav>
+    <a
+      class="brand fiscora-badge"
+      href="index.html"
+      aria-label="Fiscora dashboard"
+    >
+      <div class="brand-logo" data-brand-logo>
+        <svg
+          class="fiscora-mark"
+          viewBox="0 0 64 64"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path
+            class="fiscora-mark__letter"
+            d="M18 48V17H47M18 31H38"
+          />
+
+          <path
+            class="fiscora-mark__trend"
+            d="M24 47L34 37L41 41L51 28"
+          />
+
+          <path
+            class="fiscora-mark__arrow"
+            d="M45 28H51V34"
+          />
+        </svg>
+      </div>
+
+      <span class="brand-text">
+        <span data-i18n="app_name">Fiscora</span>
+
+        <span class="brand-edition" data-i18n="brand_descriptor">
+          AI Finance Cockpit
+        </span>
+      </span>
+    </a>
+    <div class="header-actions">
+      <a class="icon-btn" href="notification.html" id="bellBtn" aria-label="Notifications">🔔
+        <span class="bell-badge hidden" id="bellBadge">0</span></a>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+      <div class="user-chip"><div class="avatar" id="userAvatar">?</div>
+        <span class="chip-name" id="userName">—</span></div>
+    </div>
+  </div>
+</header>
+
+<main class="container command-deck">
+  <div class="chat-shell">
+    <div class="chat-topbar">
+      <div class="ai-face">✦</div>
+      <div class="grow">
+        <h1 data-i18n="ai_title">AI Financial Coach</h1>
+        <div class="text-xs faint" id="aiStatusLine" data-i18n="ai_grounded">Answers grounded in your last 30 days of data</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="clearBtn" data-i18n="clear_chat">Clear chat</button>
+    </div>
+
+    <div class="chat-scroll" id="chatScroll" aria-live="polite"></div>
+
+    <div class="suggest-row" id="suggestRow"></div>
+
+    <div class="chat-inputbar">
+      <button class="mic-btn" id="micBtn" aria-label="Voice input" title="">🎙</button>
+      <textarea class="chat-input" id="chatInput" rows="1" maxlength="4000"
+                data-i18n-ph="input_ph" placeholder="Ask about your money…"></textarea>
+      <button class="send-btn" id="sendBtn" aria-label="Send">➤</button>
+    </div>
+    <div class="mic-hint" id="micHint"></div>
+  </div>
+</main>
+
+<nav class="bottom-nav">
+  <a class="nav-link" href="index.html" data-i18n="nav_dashboard">Dashboard</a>
+  <a class="nav-link" href="bitcoin.html" data-i18n="nav_bitcoin">Bitcoin</a>
+  <a class="nav-link active" href="AI.html" data-i18n="nav_ai">AI Chat</a>
+  <a class="nav-link" href="notification.html">🔔</a>
+</nav>
+
+<!-- ══════════════ SETTINGS PANEL (canonical shared pattern) ══════════════ -->
+<div class="settings-backdrop" id="settingsBk"></div>
+<aside class="settings-panel" id="settingsPanel">
+  <div class="spread"><h3 class="mb-0" data-i18n="settings">Settings</h3>
+    <button class="modal-close" id="settingsClose">✕</button></div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="theme_presets">Theme presets</div>
+    <div class="preset-list" id="presetList"></div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="primary_color">Primary color</div>
+    <div class="swatch-row" id="primarySwatches"></div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="accent_color">Accent color</div>
+    <div class="swatch-row" id="accentSwatches"></div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="text_size">Text size</div>
+    <div class="segmented" id="fontSizeSeg">
+      <button data-fs="xs" style="font-size:11px" aria-label="Very small">A</button>
+      <button data-fs="sm" style="font-size:13px" aria-label="Small">A</button>
+      <button data-fs="md" style="font-size:15px" aria-label="Default">A</button>
+      <button data-fs="lg" style="font-size:18px" aria-label="Large">A</button>
+      <button data-fs="xl" style="font-size:22px" aria-label="Very large">A</button>
+    </div>
+    <div class="text-xs faint mt-2" id="fontSizeLabel" style="text-align:center"></div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="language">Language</div>
+    <div class="country-grid">
+      <div class="country-card" id="langEn"><span class="flag">🇬🇧</span>English</div>
+      <div class="country-card" id="langFa"><span class="flag">🇮🇷</span>فارسی</div>
+    </div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="account">Account</div>
+    <div class="row wrap gap-2 text-sm">
+      <span class="chip" id="accCountry">—</span>
+      <span class="chip" id="accUser">—</span>
+    </div>
+    <button class="btn btn-danger btn-block mt-4" id="logoutBtn" data-i18n="logout">Log out</button>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toasts"></div>
+
+<script>
+'use strict';
+/* ═════════════════ 1 · I18N ═════════════════ */
+const I18N = {
+  app_name:{en:'Fiscora',fa:'فیسکورا'},
+  brand_descriptor:{en:'AI Finance Cockpit',fa:'کابین مالی هوشمند'},
+  theme_presets:{en:'Theme presets',fa:'تم‌های آماده'},
+  text_size:{en:'Text size',fa:'اندازهٔ متن'},
+  fs_xs:{en:'Very small',fa:'خیلی کوچک'}, fs_sm:{en:'Small',fa:'کوچک'},
+  fs_md:{en:'Default',fa:'پیش‌فرض'}, fs_lg:{en:'Large',fa:'بزرگ'},
+  fs_xl:{en:'Very large',fa:'خیلی بزرگ'},
+  nav_dashboard:{en:'Dashboard',fa:'داشبورد'}, nav_bitcoin:{en:'Bitcoin',fa:'بیت‌کوین'},
+  nav_ai:{en:'AI Chat',fa:'گفتگوی هوشمند'},
+  ai_title:{en:'AI Financial Coach',fa:'مربی مالی هوشمند'},
+  ai_grounded:{en:'Answers grounded in your last 30 days of data',
+               fa:'پاسخ‌ها بر پایهٔ دادهٔ ۳۰ روز اخیر شما'},
+  clear_chat:{en:'Clear chat',fa:'پاک‌کردن گفتگو'},
+  input_ph:{en:'Ask about your money…',fa:'دربارهٔ پول خود بپرسید…'},
+  searching:{en:'Searching…',fa:'در حال جستجو…'},
+  thinking:{en:'Thinking…',fa:'در حال فکر کردن…'},
+  greeting:{en:"Hi! I'm your financial coach. I can read your transactions, budget and the Bitcoin forecast — ask me anything about your money.",
+            fa:'سلام! من مربی مالی شما هستم. به تراکنش‌ها، بودجه و پیش‌بینی بیت‌کوین شما دسترسی دارم — هر سؤالی دربارهٔ پولتان دارید بپرسید.'},
+  sug_1:{en:'How much did I spend last month?',fa:'ماه گذشته چقدر خرج کردم؟'},
+  sug_2:{en:'Which category increased the most?',fa:'کدام دسته بیشترین افزایش را داشت؟'},
+  sug_3:{en:'How can I save more this week?',fa:'این هفته چطور بیشتر پس‌انداز کنم؟'},
+  sug_4:{en:'Should I reduce restaurant spending?',fa:'آیا هزینهٔ رستوران را کم کنم؟'},
+  sug_5:{en:"What's the Bitcoin outlook?",fa:'چشم‌انداز بیت‌کوین چیست؟'},
+  mic_start:{en:'Tap to speak — tap again to stop',fa:'برای گفتن ضربه بزنید — برای توقف دوباره ضربه بزنید'},
+  mic_recording:{en:'Recording… tap to stop',fa:'در حال ضبط… برای توقف ضربه بزنید'},
+  mic_transcribing:{en:'Transcribing…',fa:'در حال تبدیل گفتار به متن…'},
+  mic_denied:{en:'Microphone access was denied.',fa:'دسترسی به میکروفون رد شد.'},
+  mic_unsupported:{en:'Voice recording is not supported in this browser.',
+                   fa:'ضبط صدا در این مرورگر پشتیبانی نمی‌شود.'},
+  stt_empty:{en:'No speech detected — try again.',fa:'گفتاری تشخیص داده نشد — دوباره تلاش کنید.'},
+  stopped:{en:'Response stopped.',fa:'پاسخ متوقف شد.'},
+  cleared:{en:'Conversation cleared',fa:'گفتگو پاک شد'},
+  net_err:{en:'Connection problem — is server.ipynb running?',
+           fa:'مشکل اتصال — آیا server.ipynb در حال اجراست؟'},
+  settings:{en:'Settings',fa:'تنظیمات'}, primary_color:{en:'Primary color',fa:'رنگ اصلی'},
+  accent_color:{en:'Accent color',fa:'رنگ تأکیدی'}, language:{en:'Language',fa:'زبان'},
+  account:{en:'Account',fa:'حساب کاربری'}, logout:{en:'Log out',fa:'خروج'},
+};
+const SUGGESTIONS = ['sug_1', 'sug_2', 'sug_3', 'sug_4', 'sug_5'];
+
+/* ═════════════════ 2 · SHARED CORE (state · utils · api · theme) ═════════════════ */
+const S = { token: localStorage.getItem('pfc_token') || '', profile: null,
+            msgs: [], streaming: false, aborter: null,
+            recording: false, transcribing: false, recorder: null, chunks: [], mime: '' };
+const $  = id => document.getElementById(id);
+const lang = () => document.documentElement.lang === 'fa' ? 'fa' : 'en';
+const L = key => (I18N[key] || {})[lang()] || key;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function mdLite(s) {                              /* escape first, then minimal markdown */
+  return esc(s)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/^[-•] (.*)$/gm, '• $1')
+    .replace(/\n/g, '<br>');
+}
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || 'success');
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => { el.classList.add('leaving'); setTimeout(() => el.remove(), 320); }, 3400);
+}
+async function api(path, opt) {
+  opt = opt || {};
+  const init = { method: opt.method || 'GET', headers: {} };
+  if (S.token) init.headers['X-Session-Token'] = S.token;
+  if (opt.body) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opt.body); }
+  if (opt.form) init.body = opt.form;
+  const res = await fetch(path, init);
+  const js = await res.json().catch(() => ({ ok:false, error:{code:'server_error', message_en:'Bad response', message_fa:'پاسخ نامعتبر'} }));
+  if (!js.ok) {
+    if (js.error && js.error.code === 'auth_required') { location.href = 'index.html'; }
+    const msg = js.error ? (lang() === 'fa' ? js.error.message_fa : js.error.message_en) : 'Error';
+    const e = new Error(msg); e.code = js.error && js.error.code; throw e;
+  }
+  return js.data;
+}
+
+/* theme engine — identical contract on every page.
+   Mansory preset engine: presets only write the same {primary, accent} hex
+   pair the theme contract has always used (values MUST stay 6-digit hex). */
+const THEME_DEFAULTS = { primary:'#d9b45b', accent:'#efdba8' };
+const THEME_PRESETS = [
+  { id:'mansory_gold', primary:'#d9b45b', accent:'#efdba8',
+    name:{en:'Mansory Carbon Gold',fa:'کربن طلایی منصوری'},
+    mood:{en:'luxury flagship',fa:'پرچم‌دار لوکس'} },
+  { id:'forged_acid', primary:'#a8e10c', accent:'#9aa8b5',
+    name:{en:'Forged Acid Green',fa:'اسیدیِ سبز فورج'},
+    mood:{en:'aggressive Mansory supercar',fa:'سوپراسپرت تهاجمی منصوری'} },
+  { id:'crimson_carbon', primary:'#f2504b', accent:'#ff9d4d',
+    name:{en:'Crimson Carbon',fa:'کربن سرخ'},
+    mood:{en:'dangerous performance',fa:'پرفورمنس خطرناک'} },
+  { id:'ice_titanium', primary:'#2ac9e8', accent:'#c7dbe6',
+    name:{en:'Ice Titanium',fa:'تیتانیوم یخی'},
+    mood:{en:'futuristic hypercar',fa:'هایپرکار آینده‌نگر'} },
+  { id:'royal_obsidian', primary:'#a57cff', accent:'#e3b341',
+    name:{en:'Royal Obsidian',fa:'ابسیدین سلطنتی'},
+    mood:{en:'exotic luxury night',fa:'شبِ لوکس و خاص'} },
+];
+const THEME_PRIMARIES = THEME_PRESETS.map(p => p.primary).concat('#e8ecf2');
+const THEME_ACCENTS   = THEME_PRESETS.map(p => p.accent).concat('#22d3a5');
+function applyPreset(p) { themeSet('primary', p.primary); themeSet('accent', p.accent); }
+function buildPresets() {
+  const host = document.getElementById('presetList');
+  if (!host) return;
+  const t = themeGet();
+  const curP = (t.primary || THEME_DEFAULTS.primary).toLowerCase();
+  const curA = (t.accent  || THEME_DEFAULTS.accent).toLowerCase();
+  host.innerHTML = THEME_PRESETS.map(p => {
+    const sel = p.primary === curP && p.accent === curA;
+    return '<button type="button" class="preset-card' + (sel ? ' selected' : '') + '" data-preset="' + p.id + '">' +
+      '<span class="preset-chips"><i style="background:' + p.primary + '"></i>' +
+      '<i style="background:' + p.accent + '"></i></span>' +
+      '<span class="preset-name">' + p.name[lang()] + '</span>' +
+      '<span class="preset-mood">' + p.mood[lang()] + '</span></button>';
+  }).join('');
+}
+(function(){ document.addEventListener('click', e => {
+  const b = e.target.closest('.preset-card[data-preset]');
+  if (!b) return;
+  const p = THEME_PRESETS.find(x => x.id === b.dataset.preset);
+  if (p) applyPreset(p);
+}); })();
+function themeGet() { try { return JSON.parse(localStorage.getItem('pfc_theme_v1') || '{}'); } catch (e) { return {}; } }
+function themeSet(key, val) {
+  const t = themeGet(); t[key] = val;
+  localStorage.setItem('pfc_theme_v1', JSON.stringify(t));
+  document.documentElement.style.setProperty('--' + key, val);
+  buildSwatches();
+}
+const FONT_SIZES = ['xs', 'sm', 'md', 'lg', 'xl'];
+function fontGet() { const v = localStorage.getItem('pfc_fontsize') || 'md'; return FONT_SIZES.includes(v) ? v : 'md'; }
+function setFontSize(v) {
+  if (!FONT_SIZES.includes(v)) v = 'md';
+  localStorage.setItem('pfc_fontsize', v);
+  document.documentElement.setAttribute('data-fontsize', v);
+  buildFontSeg();
+}
+function buildFontSeg() {
+  const cur = fontGet();
+  document.querySelectorAll('#fontSizeSeg button').forEach(b => b.classList.toggle('active', b.dataset.fs === cur));
+  const lbl = document.getElementById('fontSizeLabel');
+  if (lbl) lbl.textContent = (typeof L === 'function') ? L('fs_' + cur) : cur;
+}
+function buildSwatches() {
+  const t = themeGet();
+  const mk = (host, list, key, current) => {
+    host.innerHTML = '';
+    list.forEach(c => {
+      const d = document.createElement('div');
+      d.className = 'swatch' + (c.toLowerCase() === current ? ' selected' : '');
+      d.style.background = c;
+      d.onclick = () => themeSet(key, c);
+      host.appendChild(d);
+    });
+    const inp = document.createElement('input');
+    inp.type = 'color'; inp.className = 'color-input'; inp.value = current;
+    inp.oninput = e => themeSet(key, e.target.value);
+    host.appendChild(inp);
+  };
+  mk($('primarySwatches'), THEME_PRIMARIES, 'primary', (t.primary || THEME_DEFAULTS.primary).toLowerCase());
+  mk($('accentSwatches'), THEME_ACCENTS, 'accent', (t.accent || THEME_DEFAULTS.accent).toLowerCase());
+  buildPresets();                                        /* keep preset highlight in sync */
+}
+async function applyBranding() {
+  // Brand name + logo come from the server (env-configurable: PFC_APP_NAME / PFC_LOGO_PATH).
+  // Logo replaces the glyph tile; on any load error we fall back to the default mark.
+  try {
+    const res = await fetch('/api/branding');
+    const b = (await res.json()).data || {};
+    if (b.app_name) {
+      window.__brand = b.app_name;
+      document.querySelectorAll('[data-i18n="app_name"]').forEach(el => el.textContent = b.app_name);
+    }
+    if (b.logo_url) document.querySelectorAll('.brand-logo').forEach(el => {
+      const img = new Image();
+      img.src = b.logo_url; img.alt = 'logo';
+      img.style.cssText = 'width:64%;height:64%;object-fit:contain';
+      img.onerror = () => { el.textContent = '\u25C8'; };
+      el.textContent = ''; el.appendChild(img);
+    });
+  } catch (e) { /* keep glyph + i18n defaults */ }
+}
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = L(el.dataset.i18n); });
+  if (window.__brand) document.querySelectorAll('[data-i18n="app_name"]').forEach(el => { el.textContent = window.__brand; });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = L(el.dataset.i18nPh); });
+  document.title = L('app_name') + ' — ' + L('nav_ai');
+  $('micBtn').title = L('mic_start');
+  buildPresets();                                        /* preset names are bilingual */
+}
+function setLang(l, persist) {
+  document.documentElement.lang = l;
+  document.documentElement.dir = l === 'fa' ? 'rtl' : 'ltr';
+  localStorage.setItem('pfc_lang', l);
+  $('langEn').classList.toggle('selected', l === 'en');
+  $('langFa').classList.toggle('selected', l === 'fa');
+  applyI18n(); renderChat(); renderSuggestions();
+  if (persist && S.profile) api('/api/profile', { method:'PUT', body:{ language: l } })
+    .then(p => S.profile = p).catch(() => {});
+}
+function openPanel() { $('settingsPanel').classList.add('open'); $('settingsBk').classList.add('open'); buildSwatches(); buildFontSeg(); }
+function closePanel() { $('settingsPanel').classList.remove('open'); $('settingsBk').classList.remove('open'); }
+function logout() {
+  api('/api/auth/logout', { method:'POST' }).catch(() => {});
+  localStorage.removeItem('pfc_token');
+  location.href = 'index.html';
+}
+async function pollBell() {
+  if (!S.token) return;
+  try {
+    const d = await api('/api/notifications/count');
+    const b = $('bellBadge');
+    b.textContent = d.unread > 99 ? '99+' : d.unread;
+    b.classList.toggle('hidden', d.unread === 0);
+    b.classList.toggle('pulse', d.unread > 0);
+  } catch (e) { /* silent */ }
+}
+
+/* ═════════════════ 3 · CONVERSATION STATE & RENDERING ═════════════════ */
+const STORE_KEY = 'pfc_chat_v1';
+function loadMsgs() {
+  try { S.msgs = JSON.parse(sessionStorage.getItem(STORE_KEY) || '[]'); }
+  catch (e) { S.msgs = []; }
+}
+function saveMsgs() {
+  try { sessionStorage.setItem(STORE_KEY, JSON.stringify(S.msgs.slice(-60))); } catch (e) { /* full */ }
+}
+function bubbleEl(role, html) {
+  const b = document.createElement('div');
+  b.className = 'bubble ' + (role === 'user' ? 'user' : 'ai');
+  b.innerHTML = '<span class="md">' + html + '</span>';
+  return b;
+}
+function renderChat() {
+  const sc = $('chatScroll');
+  sc.innerHTML = '';
+  sc.appendChild(bubbleEl('assistant', mdLite(L('greeting'))));
+  S.msgs.forEach(m => sc.appendChild(bubbleEl(m.role, mdLite(m.content))));
+  scrollDown(true);
+}
+function renderSuggestions() {
+  $('suggestRow').innerHTML = '';
+  $('suggestRow').classList.toggle('hidden', S.msgs.length > 0);
+  if (S.msgs.length > 0) return;
+  SUGGESTIONS.forEach(key => {
+    const c = document.createElement('button');
+    c.className = 'suggest-chip';
+    c.textContent = L(key);
+    c.onclick = () => { $('chatInput').value = L(key); send(); };
+    $('suggestRow').appendChild(c);
+  });
+}
+function scrollDown(instant) {
+  const sc = $('chatScroll');
+  sc.scrollTo({ top: sc.scrollHeight, behavior: instant ? 'instant' : 'smooth' });
+}
+let statusEl = null;
+function showStatus(labelKey) {
+  hideStatus();
+  statusEl = document.createElement('div');
+  statusEl.className = 'status-searching';
+  statusEl.innerHTML = esc(L(labelKey)) +
+    ' <span class="dots"><i></i><i></i><i></i></span>';
+  $('chatScroll').appendChild(statusEl);
+  scrollDown();
+}
+function hideStatus() { if (statusEl) { statusEl.remove(); statusEl = null; } }
+
+/* ═════════════════ 4 · SEND & STREAM (the “Searching…” contract) ═════════════════ */
+function setStreaming(on) {
+  S.streaming = on;
+  $('sendBtn').textContent = on ? '■' : '➤';
+  $('chatInput').disabled = false;
+  $('micBtn').disabled = on;
+}
+async function send() {
+  const text = $('chatInput').value.trim();
+  if (!text) return;
+  if (S.streaming) return;
+  $('chatInput').value = ''; autoGrow();
+  S.msgs.push({ role: 'user', content: text }); saveMsgs();
+  renderSuggestions();
+  $('chatScroll').appendChild(bubbleEl('user', mdLite(text)));
+  scrollDown();
+  showStatus('thinking');                          /* immediate feedback… */
+  setStreaming(true);
+
+  const history = S.msgs.slice(0, -1).slice(-10).map(m => ({ role: m.role, content: m.content }));
+  S.aborter = new AbortController();
+  let aiBubble = null, answer = '';
+
+  const finalize = () => {
+    hideStatus();
+    if (aiBubble) aiBubble.classList.remove('streaming');
+    if (answer.trim()) { S.msgs.push({ role: 'assistant', content: answer }); saveMsgs(); }
+    setStreaming(false);
+    S.aborter = null;
+  };
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': S.token },
+      body: JSON.stringify({ message: text, history }),
+      signal: S.aborter.signal,
+    });
+    if ((res.headers.get('content-type') || '').includes('application/json')) {
+      const js = await res.json();                 /* non-stream envelope = error */
+      if (js.error && js.error.code === 'auth_required') { location.href = 'index.html'; return; }
+      throw new Error(js.error ? (lang() === 'fa' ? js.error.message_fa : js.error.message_en) : 'Error');
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const handle = ev => {
+      if (ev.type === 'status') {                  /* the required “Searching…” UX */
+        if (!answer) showStatus('searching');
+      } else if (ev.type === 'token') {
+        if (!aiBubble) {
+          hideStatus();
+          aiBubble = bubbleEl('assistant', '');
+          aiBubble.classList.add('streaming');
+          $('chatScroll').appendChild(aiBubble);
+        }
+        answer += ev.text;
+        aiBubble.querySelector('.md').innerHTML = mdLite(answer);
+        scrollDown();
+      } else if (ev.type === 'error') {
+        toast(lang() === 'fa' ? 'سرویس هوشمند در دسترس نیست — پاسخ جایگزین ارائه می‌شود.'
+                              : 'AI service unreachable — showing a fallback answer.', 'warning');
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (line) { try { handle(JSON.parse(line)); } catch (e) { /* skip bad line */ } }
+      }
+    }
+    finalize();
+  } catch (err) {
+    if (err.name === 'AbortError') { toast(L('stopped'), 'warning'); finalize(); return; }
+    finalize();
+    toast(err.message === 'Failed to fetch' ? L('net_err') : err.message, 'error');
+  }
+}
+function stopStreaming() { if (S.aborter) S.aborter.abort(); }
+
+/* ═════════════════ 5 · VOICE INPUT (mic → Whisper STT → input box) ═════════════════ */
+function pickMime() {
+  if (!window.MediaRecorder) return null;
+  for (const m of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';                                       /* let the browser choose */
+}
+async function toggleMic() {
+  if (S.transcribing || S.streaming) return;
+  if (S.recording) { S.recorder.stop(); return; }  /* second tap stops */
+  if (!navigator.mediaDevices || !window.MediaRecorder) { toast(L('mic_unsupported'), 'error'); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { toast(L('mic_denied'), 'error'); return; }
+
+  S.mime = pickMime() || '';
+  S.chunks = [];
+  S.recorder = new MediaRecorder(stream, S.mime ? { mimeType: S.mime } : undefined);
+  S.recorder.ondataavailable = e => { if (e.data && e.data.size) S.chunks.push(e.data); };
+  S.recorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    S.recording = false;
+    $('micBtn').classList.remove('recording');
+    $('micHint').textContent = L('mic_transcribing');
+    S.transcribing = true; $('micBtn').textContent = '…';
+    try {
+      const type = S.mime || (S.chunks[0] && S.chunks[0].type) || 'audio/webm';
+      const blob = new Blob(S.chunks, { type });
+      const ext = type.includes('mp4') ? 'mp4' : type.includes('ogg') ? 'ogg' : 'webm';
+      const form = new FormData();
+      form.append('file', blob, 'voice.' + ext);
+      const d = await api('/api/stt', { method: 'POST', form });
+      const t = (d.text || '').trim();
+      if (t) {
+        const inp = $('chatInput');
+        inp.value = (inp.value ? inp.value + ' ' : '') + t;   /* inserted, never auto-sent */
+        autoGrow(); inp.focus();
+      } else { toast(L('stt_empty'), 'warning'); }
+    } catch (e) { toast(e.message, 'error'); }
+    finally {
+      S.transcribing = false;
+      $('micBtn').textContent = '🎙';
+      $('micHint').textContent = '';
+    }
+  };
+  S.recorder.start();
+  S.recording = true;
+  $('micBtn').classList.add('recording');
+  $('micHint').textContent = L('mic_recording');
+}
+
+/* ═════════════════ 6 · INPUT UX · WIRING · BOOT ═════════════════ */
+function autoGrow() {
+  const inp = $('chatInput');
+  inp.style.height = 'auto';
+  inp.style.height = Math.min(inp.scrollHeight, 130) + 'px';
+}
+$('chatInput').addEventListener('input', autoGrow);
+$('chatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$('sendBtn').addEventListener('click', () => S.streaming ? stopStreaming() : send());
+$('micBtn').addEventListener('click', toggleMic);
+$('clearBtn').addEventListener('click', () => {
+  if (S.streaming) stopStreaming();
+  S.msgs = []; saveMsgs(); renderChat(); renderSuggestions(); toast(L('cleared'));
+});
+$('settingsBtn').addEventListener('click', openPanel);
+(function(){ const seg = $('fontSizeSeg'); if (seg) seg.addEventListener('click', e => {
+  const b = e.target.closest('button[data-fs]'); if (b) setFontSize(b.dataset.fs); }); buildFontSeg(); })();
+$('settingsClose').addEventListener('click', closePanel);
+$('settingsBk').addEventListener('click', closePanel);
+$('langEn').addEventListener('click', () => setLang('en', true));
+$('langFa').addEventListener('click', () => setLang('fa', true));
+$('logoutBtn').addEventListener('click', logout);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+window.addEventListener('focus', pollBell);
+
+applyBranding();
+(async function boot() {
+  applyI18n();
+  if (!S.token) { location.href = 'index.html'; return; }
+  try { S.profile = await api('/api/profile'); }
+  catch (e) { return; }                            /* api() already redirected on auth_required */
+  $('userName').textContent = S.profile.username;
+  $('userAvatar').textContent = (S.profile.username[0] || '?').toUpperCase();
+  $('accCountry').textContent = S.profile.country === 'IR' ? '🇮🇷 ایران' : '🇺🇸 USA';
+  $('accUser').textContent = '@' + S.profile.username;
+  loadMsgs();
+  if (S.profile.language !== lang()) setLang(S.profile.language, false);
+  else { setLang(lang(), false); }
+  pollBell(); setInterval(pollBell, 15000);
+  $('chatInput').focus();
+})();
+</script>
+</body>
+</html>

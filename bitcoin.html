@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════
+     AI PERSONAL FINANCE COACH — bitcoin.html (Bitcoin Forecast Console)
+     Served by server.ipynb at http://localhost:8000/bitcoin.html
+     · 30-day price history + 10-day LSTM forecast with uncertainty cone
+     · UP / DOWN / HOLD signal card with confidence + expected move
+     · Model transparency: metrics vs persistence / drift / base-rate baselines
+     · Grounded bilingual commentary + not-financial-advice disclaimer
+     · Degrades cleanly: cached/dataset prices when APIs are down, and a
+       clear notice when model artifacts are missing (bitcoin.ipynb not run)
+     · Same shared bootstrap as all pages: theme (pfc_theme_v1), language
+       (pfc_lang), session (pfc_token), full fa/en + RTL
+     ═══════════════════════════════════════════════════════════════════ -->
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fiscora — Bitcoin</title>
+<script>
+(function () {                                  /* paint-blocking theme + language */
+  try {
+    var t = JSON.parse(localStorage.getItem('pfc_theme_v1') || '{}');
+    if (t.primary) document.documentElement.style.setProperty('--primary', t.primary);
+    if (t.accent)  document.documentElement.style.setProperty('--accent',  t.accent);
+    var lang = localStorage.getItem('pfc_lang') || 'en';
+    document.documentElement.lang = lang;
+    document.documentElement.dir = (lang === 'fa') ? 'rtl' : 'ltr';
+    var fs = localStorage.getItem('pfc_fontsize') || 'md';
+    document.documentElement.setAttribute('data-fontsize', fs);
+  } catch (e) { /* first visit */ }
+})();
+</script>
+<link rel="stylesheet" href="style.css">
+<style>
+/* page-scoped styles only — the design system lives in style.css */
+.price-hero .src-tag { font-size: var(--fs-xs); }
+.signal-arrow { font-size: 2.4rem; line-height: 1; }
+.conf-track { height: 7px; border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--ink-faint) 18%, transparent); overflow: hidden; }
+.conf-fill { height: 100%; border-radius: inherit; transition: width 0.9s var(--ease-spring); }
+.signal-up   .conf-fill { background: var(--good); }
+.signal-down .conf-fill { background: var(--bad); }
+.signal-hold .conf-fill { background: var(--warn); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: var(--sp-4); font-size: var(--fs-xs); color: var(--ink-soft); }
+.chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+.lg-line { width: 22px; height: 3px; border-radius: 2px; background: var(--primary); }
+.lg-dash { width: 22px; height: 0; border-top: 3px dashed var(--accent); }
+.lg-cone { width: 22px; height: 12px; border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.baseline-table td:first-child { color: var(--ink-soft); }
+.baseline-table .is-model td { color: var(--ink); font-weight: 700; }
+.commentary { line-height: 1.75; font-size: var(--fs-sm); }
+.model-missing { border-inline-start: 3px solid var(--warn); }
+kbd.code { font-family: ui-monospace, monospace; background: var(--primary-faint);
+  padding: 2px 8px; border-radius: 6px; font-size: var(--fs-xs); }
+
+
+/* Fiscora logo — the only page-level visual addition */
+.brand-logo[data-brand-logo] {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.fiscora-mark {
+  display: block;
+  width: 74%;
+  height: 74%;
+  filter: drop-shadow(0 0 5px var(--primary-glow)) drop-shadow(0 1px 1px rgba(0,0,0,.55));
+}
+.fiscora-mark__letter {
+  fill: none;
+  stroke: var(--primary-strong);
+  stroke-width: 5.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fiscora-mark__trend,
+.fiscora-mark__arrow {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+</style>
+</head>
+<body class="has-bottom-nav">
+
+<header class="app-header">
+  <div class="container">
+    <nav class="nav-links">
+      <a class="nav-link" href="index.html" data-i18n="nav_dashboard">Dashboard</a>
+      <a class="nav-link active" href="bitcoin.html" data-i18n="nav_bitcoin">Bitcoin</a>
+      <a class="nav-link" href="AI.html" data-i18n="nav_ai">AI Chat</a>
+    </nav>
+    <a
+      class="brand fiscora-badge"
+      href="index.html"
+      aria-label="Fiscora dashboard"
+    >
+      <div class="brand-logo" data-brand-logo>
+        <svg
+          class="fiscora-mark"
+          viewBox="0 0 64 64"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path
+            class="fiscora-mark__letter"
+            d="M18 48V17H47M18 31H38"
+          />
+
+          <path
+            class="fiscora-mark__trend"
+            d="M24 47L34 37L41 41L51 28"
+          />
+
+          <path
+            class="fiscora-mark__arrow"
+            d="M45 28H51V34"
+          />
+        </svg>
+      </div>
+
+      <span class="brand-text">
+        <span data-i18n="app_name">Fiscora</span>
+
+        <span class="brand-edition" data-i18n="brand_descriptor">
+          AI Finance Cockpit
+        </span>
+      </span>
+    </a>
+    <div class="header-actions">
+      <a class="icon-btn" href="notification.html" id="bellBtn" aria-label="Notifications">🔔
+        <span class="bell-badge hidden" id="bellBadge">0</span></a>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+      <div class="user-chip"><div class="avatar" id="userAvatar">?</div>
+        <span class="chip-name" id="userName">—</span></div>
+    </div>
+  </div>
+</header>
+
+<main class="container page-grid stagger command-deck">
+
+  <!-- deck head · page identity strip -->
+  <section class="deck-head col-12">
+    <h1 class="deck-title" data-i18n="deck_title">Market Telemetry</h1>
+    <div class="deck-sub" data-i18n="deck_sub">Mansory Forecast Engine</div>
+    <div class="slash-divider"></div>
+  </section>
+
+  <!-- row 1 · price hero + signal + reliability -->
+  <section class="glass-card lift col-4 price-hero">
+    <div class="spread">
+      <div class="card-title mb-0">₿ <span data-i18n="btc_price">Bitcoin price</span></div>
+      <span class="tag severity-info src-tag" id="srcTag">—</span>
+    </div>
+    <div class="price-big money mt-2" id="priceBig">—</div>
+    <span class="stat-delta" id="chg30"></span>
+    <div class="text-xs faint mt-2" id="asOf"></div>
+  </section>
+
+  <section class="glass-card lift col-4 signal-card signal-hold" id="signalCard">
+    <div class="card-title" data-i18n="signal_title">10-day model signal</div>
+    <div class="signal-arrow" id="sigArrow">●</div>
+    <div class="signal-label" id="sigLabel">—</div>
+    <div class="signal-conf" id="sigMove"></div>
+    <div class="mt-4">
+      <div class="spread text-xs muted"><span data-i18n="confidence">Confidence</span><b id="confPct">—</b></div>
+      <div class="conf-track mt-2"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
+    </div>
+    <div class="text-sm mt-4" id="sigAdvice" style="font-weight:600"></div>
+  </section>
+
+  <section class="glass-card lift col-4">
+    <div class="card-title" data-i18n="reliability">Model reliability (held-out test)</div>
+    <div class="metric-grid" id="metricGrid">
+      <div class="metric"><div class="m-value" id="mHit">—</div><div class="m-label" data-i18n="m_hit">hit-rate when acting</div></div>
+      <div class="metric"><div class="m-value" id="mDir1">—</div><div class="m-label" data-i18n="m_dir1">direction · day +1</div></div>
+      <div class="metric"><div class="m-value" id="mDir10">—</div><div class="m-label" data-i18n="m_dir10">direction · day +10</div></div>
+      <div class="metric"><div class="m-value" id="mMape">—</div><div class="m-label" data-i18n="m_mape">price error (MAPE, day +10)</div></div>
+    </div>
+    <p class="text-xs faint mt-4 mb-0" data-i18n="reliability_note">Numbers come from walk-forward evaluation on unseen data — shown so you can judge the model honestly.</p>
+  </section>
+
+  <!-- model missing notice (replaces forecast widgets when artifacts absent) -->
+  <section class="glass-card col-12 model-missing hidden" id="modelMissing">
+    <div class="row" style="align-items:flex-start">
+      <div style="font-size:1.6rem">🧠</div>
+      <div>
+        <b data-i18n="model_missing_title">Forecast model not loaded</b>
+        <p class="text-sm muted mb-0"><span data-i18n="model_missing_body">Run</span>
+          <kbd class="code">bitcoin.ipynb</kbd>
+          <span data-i18n="model_missing_body2">once to train and save the LSTM, then restart server.ipynb. Price history below still works.</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- row 2 · chart -->
+  <section class="glass-card col-12">
+    <div class="spread wrap">
+      <div class="card-title mb-0" data-i18n="chart_title">Last 30 days + 10-day forecast</div>
+      <div class="chart-legend">
+        <span class="lg"><span class="lg-line"></span><span data-i18n="lg_history">history</span></span>
+        <span class="lg" id="lgForecast"><span class="lg-dash"></span><span data-i18n="lg_forecast">LSTM forecast</span></span>
+        <span class="lg" id="lgCone"><span class="lg-cone"></span><span data-i18n="lg_cone">uncertainty (±1σ)</span></span>
+      </div>
+    </div>
+    <div class="chart-frame mt-4" style="min-height:300px"><canvas id="chartCanvas" height="300"></canvas></div>
+  </section>
+
+  <!-- row 3 · forecast table + commentary -->
+  <section class="glass-card col-7" id="forecastCard">
+    <div class="card-title" data-i18n="forecast_table">Day-by-day forecast</div>
+    <table class="table">
+      <thead><tr><th data-i18n="th_date">Date</th><th data-i18n="th_price">Forecast close</th>
+        <th data-i18n="th_move">Cumulative move</th></tr></thead>
+      <tbody id="fcRows"><tr><td colspan="3"><div class="skeleton skeleton-text"></div></td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="glass-card col-5">
+    <div class="card-title" data-i18n="commentary_title">Coach's read</div>
+    <p class="commentary" id="commentary"><span class="skeleton skeleton-text" style="display:block"></span></p>
+    <div class="disclaimer mt-4">⚠️ <span data-i18n="disclaimer">Forecasts are decision support with quantified uncertainty — not financial advice. Crypto is volatile; never invest money you cannot afford to lose.</span></div>
+  </section>
+
+  <!-- row 4 · transparency table -->
+  <section class="glass-card col-12" id="baselineCard">
+    <div class="card-title" data-i18n="baseline_title">Transparency — model vs. naive baselines (validation year)</div>
+    <table class="table baseline-table">
+      <thead><tr><th data-i18n="th_strategy">Strategy</th>
+        <th data-i18n="th_mape1">Price error day +1</th><th data-i18n="th_mape10">Price error day +10</th>
+        <th data-i18n="th_dir1">Direction day +1</th><th data-i18n="th_dir10">Direction day +10</th></tr></thead>
+      <tbody id="blRows"><tr><td colspan="5"><div class="skeleton skeleton-text"></div></td></tr></tbody>
+    </table>
+    <p class="text-xs faint mt-2 mb-0" data-i18n="baseline_note">A real edge over “persistence” and “always-up” is what makes a forecast worth showing — we publish the comparison instead of hiding it.</p>
+  </section>
+</main>
+
+<nav class="bottom-nav">
+  <a class="nav-link" href="index.html" data-i18n="nav_dashboard">Dashboard</a>
+  <a class="nav-link active" href="bitcoin.html" data-i18n="nav_bitcoin">Bitcoin</a>
+  <a class="nav-link" href="AI.html" data-i18n="nav_ai">AI Chat</a>
+  <a class="nav-link" href="notification.html">🔔</a>
+</nav>
+
+<!-- ══════════════ SETTINGS PANEL (canonical shared pattern) ══════════════ -->
+<div class="settings-backdrop" id="settingsBk"></div>
+<aside class="settings-panel" id="settingsPanel">
+  <div class="spread"><h3 class="mb-0" data-i18n="settings">Settings</h3>
+    <button class="modal-close" id="settingsClose">✕</button></div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="theme_presets">Theme presets</div>
+    <div class="preset-list" id="presetList"></div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="primary_color">Primary color</div>
+    <div class="swatch-row" id="primarySwatches"></div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="accent_color">Accent color</div>
+    <div class="swatch-row" id="accentSwatches"></div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="text_size">Text size</div>
+    <div class="segmented" id="fontSizeSeg">
+      <button data-fs="xs" style="font-size:11px" aria-label="Very small">A</button>
+      <button data-fs="sm" style="font-size:13px" aria-label="Small">A</button>
+      <button data-fs="md" style="font-size:15px" aria-label="Default">A</button>
+      <button data-fs="lg" style="font-size:18px" aria-label="Large">A</button>
+      <button data-fs="xl" style="font-size:22px" aria-label="Very large">A</button>
+    </div>
+    <div class="text-xs faint mt-2" id="fontSizeLabel" style="text-align:center"></div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="language">Language</div>
+    <div class="country-grid">
+      <div class="country-card" id="langEn"><span class="flag">🇬🇧</span>English</div>
+      <div class="country-card" id="langFa"><span class="flag">🇮🇷</span>فارسی</div>
+    </div>
+  </div>
+  <div class="settings-section">
+    <div class="card-title" data-i18n="account">Account</div>
+    <div class="row wrap gap-2 text-sm">
+      <span class="chip" id="accCountry">—</span>
+      <span class="chip" id="accUser">—</span>
+    </div>
+    <button class="btn btn-danger btn-block mt-4" id="logoutBtn" data-i18n="logout">Log out</button>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toasts"></div>
+
+<script>
+'use strict';
+/* ═════════════════ 1 · I18N ═════════════════ */
+const I18N = {
+  app_name:{en:'Fiscora',fa:'فیسکورا'},
+  brand_descriptor:{en:'AI Finance Cockpit',fa:'کابین مالی هوشمند'},
+  deck_title:{en:'Market Telemetry',fa:'تله‌متری بازار'},
+  deck_sub:{en:'Mansory Forecast Engine',fa:'موتور پیش‌بینی منصوری'},
+  theme_presets:{en:'Theme presets',fa:'تم‌های آماده'},
+  text_size:{en:'Text size',fa:'اندازهٔ متن'},
+  fs_xs:{en:'Very small',fa:'خیلی کوچک'}, fs_sm:{en:'Small',fa:'کوچک'},
+  fs_md:{en:'Default',fa:'پیش‌فرض'}, fs_lg:{en:'Large',fa:'بزرگ'},
+  fs_xl:{en:'Very large',fa:'خیلی بزرگ'},
+  nav_dashboard:{en:'Dashboard',fa:'داشبورد'}, nav_bitcoin:{en:'Bitcoin',fa:'بیت‌کوین'},
+  nav_ai:{en:'AI Chat',fa:'گفتگوی هوشمند'},
+  btc_price:{en:'Bitcoin price',fa:'قیمت بیت‌کوین'},
+  chg_30d:{en:'30-day change',fa:'تغییر ۳۰ روزه'},
+  as_of:{en:'as of {d}',fa:'تا {d}'},
+  signal_title:{en:'10-day model signal',fa:'سیگنال ده‌روزهٔ مدل'},
+  confidence:{en:'Confidence',fa:'اطمینان'},
+  sig_up:{en:'UP',fa:'صعودی'}, sig_down:{en:'DOWN',fa:'نزولی'}, sig_hold:{en:'HOLD',fa:'نگه‌داری'},
+  move_line:{en:'{m} expected over 10 days · ±{u}% uncertainty',
+             fa:'{m} پیش‌بینی برای ۱۰ روز · عدم قطعیت ±{u}٪'},
+  advice_up:{en:'Model view: possible buying window — small positions only.',
+             fa:'دید مدل: پنجرهٔ احتمالی خرید — فقط با حجم کم.'},
+  advice_down:{en:'Model view: consider waiting or reducing exposure.',
+               fa:'دید مدل: صبر یا کاهش موقعیت را در نظر بگیرید.'},
+  advice_hold:{en:'Model view: no strong opportunity — holding is reasonable.',
+               fa:'دید مدل: فرصت قوی دیده نمی‌شود — نگه‌داری منطقی است.'},
+  reliability:{en:'Model reliability (held-out test)',fa:'اعتبار مدل (دادهٔ دیده‌نشده)'},
+  m_hit:{en:'hit-rate when acting',fa:'دقت هنگام صدور سیگنال'},
+  m_dir1:{en:'direction · day +1',fa:'جهت · روز ۱+'},
+  m_dir10:{en:'direction · day +10',fa:'جهت · روز ۱۰+'},
+  m_mape:{en:'price error (MAPE, day +10)',fa:'خطای قیمت (روز ۱۰+)'},
+  reliability_note:{en:'Numbers come from walk-forward evaluation on unseen data — shown so you can judge the model honestly.',
+                    fa:'این اعداد از ارزیابی گام‌به‌گام روی دادهٔ دیده‌نشده به‌دست آمده‌اند — تا بتوانید صادقانه دربارهٔ مدل قضاوت کنید.'},
+  model_missing_title:{en:'Forecast model not loaded',fa:'مدل پیش‌بینی بارگذاری نشده است'},
+  model_missing_body:{en:'Run',fa:'ابتدا'},
+  model_missing_body2:{en:'once to train and save the LSTM, then restart server.ipynb. Price history below still works.',
+                       fa:'را یک‌بار اجرا کنید تا مدل LSTM آموزش ببیند و ذخیره شود، سپس server.ipynb را دوباره اجرا کنید. نمودار قیمت همچنان کار می‌کند.'},
+  chart_title:{en:'Last 30 days + 10-day forecast',fa:'۳۰ روز گذشته + پیش‌بینی ۱۰ روز آینده'},
+  lg_history:{en:'history',fa:'تاریخچه'}, lg_forecast:{en:'LSTM forecast',fa:'پیش‌بینی LSTM'},
+  lg_cone:{en:'uncertainty (±1σ)',fa:'عدم قطعیت (±1σ)'},
+  today_marker:{en:'today',fa:'امروز'},
+  forecast_table:{en:'Day-by-day forecast',fa:'پیش‌بینی روزبه‌روز'},
+  th_date:{en:'Date',fa:'تاریخ'}, th_price:{en:'Forecast close',fa:'قیمت پیش‌بینی‌شده'},
+  th_move:{en:'Cumulative move',fa:'تغییر تجمعی'},
+  commentary_title:{en:"Coach's read",fa:'تحلیل مربی'},
+  disclaimer:{en:'Forecasts are decision support with quantified uncertainty — not financial advice. Crypto is volatile; never invest money you cannot afford to lose.',
+              fa:'پیش‌بینی‌ها صرفاً پشتیبان تصمیم با عدم قطعیت مشخص هستند — توصیهٔ مالی نیستند. رمزارز پرنوسان است؛ هرگز پولی را که توان از دست دادنش را ندارید سرمایه‌گذاری نکنید.'},
+  baseline_title:{en:'Transparency — model vs. naive baselines (validation year)',
+                  fa:'شفافیت — مدل در برابر خطوط پایهٔ ساده (سال اعتبارسنجی)'},
+  th_strategy:{en:'Strategy',fa:'راهبرد'},
+  th_mape1:{en:'Price error day +1',fa:'خطای قیمت روز ۱+'}, th_mape10:{en:'Price error day +10',fa:'خطای قیمت روز ۱۰+'},
+  th_dir1:{en:'Direction day +1',fa:'جهت روز ۱+'}, th_dir10:{en:'Direction day +10',fa:'جهت روز ۱۰+'},
+  bl_model:{en:'LSTM model (ours)',fa:'مدل LSTM (ما)'},
+  bl_persist:{en:'Persistence (price stays flat)',fa:'ماندگاری (قیمت ثابت می‌ماند)'},
+  bl_drift:{en:'Drift (60-day trend continues)',fa:'روند (ادامهٔ روند ۶۰ روزه)'},
+  bl_alwaysup:{en:'Always-up base rate',fa:'نرخ پایهٔ همیشه‌صعودی'},
+  baseline_note:{en:'A real edge over “persistence” and “always-up” is what makes a forecast worth showing — we publish the comparison instead of hiding it.',
+                 fa:'برتری واقعی نسبت به «ماندگاری» و «همیشه‌صعودی» است که یک پیش‌بینی را ارزشمند می‌کند — ما این مقایسه را منتشر می‌کنیم، نه پنهان.'},
+  commentary_up:{en:'The model reads the next 10 days as likely upward: {m} expected with ±{u}% uncertainty (confidence {c}%). On held-out data, acting on signals like this was right {h}% of the time — a modest, honest edge, not a promise. If you buy, size the position so a {u}% drop would not hurt your budget.',
+                 fa:'مدل ده روز آینده را احتمالاً صعودی می‌بیند: {m} پیش‌بینی با عدم قطعیت ±{u}٪ (اطمینان {c}٪). روی دادهٔ دیده‌نشده، عمل به چنین سیگنال‌هایی {h}٪ مواقع درست بوده — یک برتری کوچک و صادقانه، نه یک وعده. اگر خرید می‌کنید، حجم را طوری انتخاب کنید که افت {u}٪ به بودجهٔ شما آسیب نزند.'},
+  commentary_down:{en:'The model reads the next 10 days as likely downward: {m} expected with ±{u}% uncertainty (confidence {c}%). On held-out data, acting on signals like this was right {h}% of the time. Waiting for a better entry — or trimming an oversized position — is the coach-consistent move here.',
+                   fa:'مدل ده روز آینده را احتمالاً نزولی می‌بیند: {m} پیش‌بینی با عدم قطعیت ±{u}٪ (اطمینان {c}٪). روی دادهٔ دیده‌نشده، عمل به چنین سیگنال‌هایی {h}٪ مواقع درست بوده است. صبر برای نقطهٔ ورود بهتر — یا سبک‌کردن موقعیت سنگین — انتخاب هم‌راستا با مربی است.'},
+  commentary_hold:{en:'The model sees no strong edge for the next 10 days ({m} expected, inside its ±{u}% uncertainty). An honest model of a near-random market should say HOLD often — this is that honesty. Focus on your budget; opportunistic trades can wait for a clearer signal.',
+                   fa:'مدل برای ده روز آینده برتری قابل‌اتکایی نمی‌بیند ({m} پیش‌بینی، داخل بازهٔ عدم قطعیت ±{u}٪). یک مدل صادق در بازاری نزدیک به تصادفی باید اغلب «نگه‌داری» بگوید — این همان صداقت است. تمرکز را روی بودجهٔ خود بگذارید؛ معامله می‌تواند منتظر سیگنال شفاف‌تر بماند.'},
+  src_cryptocompare:{en:'live · CryptoCompare',fa:'زنده · کریپتوکمپر'},
+  src_coingecko_approx:{en:'live · CoinGecko',fa:'زنده · کوین‌گکو'},
+  src_dataset_fallback:{en:'offline dataset',fa:'دادهٔ آفلاین'},
+  src_stale:{en:'cached',fa:'حافظهٔ موقت'},
+  settings:{en:'Settings',fa:'تنظیمات'}, primary_color:{en:'Primary color',fa:'رنگ اصلی'},
+  accent_color:{en:'Accent color',fa:'رنگ تأکیدی'}, language:{en:'Language',fa:'زبان'},
+  account:{en:'Account',fa:'حساب کاربری'}, logout:{en:'Log out',fa:'خروج'},
+};
+const JMONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+const GMONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+/* ═════════════════ 2 · SHARED CORE (state · utils · api · theme) ═════════════════ */
+const S = { token: localStorage.getItem('pfc_token') || '', profile: null,
+            history: null, forecast: null };
+const $  = id => document.getElementById(id);
+const lang = () => document.documentElement.lang === 'fa' ? 'fa' : 'en';
+const L = (key, vars) => {
+  let s = (I18N[key] || {})[lang()] || key;
+  for (const k in (vars || {})) s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), vars[k]);
+  return s;
+};
+const nf = (v, d) => new Intl.NumberFormat(lang() === 'fa' ? 'fa-IR' : 'en-US',
+              { maximumFractionDigits: d == null ? 2 : d, minimumFractionDigits: d == null ? 0 : d }).format(v);
+const usd = v => lang() === 'fa' ? nf(v, v >= 1000 ? 0 : 2) + ' دلار'
+                                 : '$' + new Intl.NumberFormat('en-US',
+                                   { maximumFractionDigits: v >= 1000 ? 0 : 2 }).format(v);
+const pct = v => (v > 0 ? '+' : v < 0 ? '−' : '') + nf(Math.abs(v), 1) + (lang() === 'fa' ? '٪' : '%');
+function g2j(gy, gm, gd) {
+  const gdm = [0,31,59,90,120,151,181,212,243,273,304,334];
+  const gy2 = gy - 1600;
+  let days = 365*gy2 + Math.floor((gy2+3)/4) - Math.floor((gy2+99)/100) + Math.floor((gy2+399)/400) - 80 + gd + gdm[gm-1];
+  if (gm > 2 && ((gy%4===0 && gy%100!==0) || gy%400===0)) days++;
+  let jy = 979 + 33*Math.floor(days/12053); days %= 12053;
+  jy += 4*Math.floor(days/1461); days %= 1461;
+  if (days > 365) { jy += Math.floor((days-1)/365); days = (days-1)%365; }
+  const jm = days < 186 ? 1 + Math.floor(days/31) : 7 + Math.floor((days-186)/30);
+  const jd = 1 + (days < 186 ? days%31 : (days-186)%30);
+  return [jy, jm, jd];
+}
+function fmtDate(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  if (lang() === 'fa') { const [ , jm, jd] = g2j(d.getFullYear(), d.getMonth()+1, d.getDate());
+    return nf(jd) + ' ' + JMONTHS[jm-1]; }
+  return GMONTHS[d.getMonth()] + ' ' + d.getDate();
+}
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || 'success');
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => { el.classList.add('leaving'); setTimeout(() => el.remove(), 320); }, 3400);
+}
+async function api(path, opt) {
+  opt = opt || {};
+  const init = { method: opt.method || 'GET', headers: {} };
+  if (S.token) init.headers['X-Session-Token'] = S.token;
+  if (opt.body) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opt.body); }
+  const res = await fetch(path, init);
+  const js = await res.json().catch(() => ({ ok:false, error:{code:'server_error', message_en:'Bad response', message_fa:'پاسخ نامعتبر'} }));
+  if (!js.ok) {
+    if (js.error && js.error.code === 'auth_required') { location.href = 'index.html'; }
+    const msg = js.error ? (lang() === 'fa' ? js.error.message_fa : js.error.message_en) : 'Error';
+    const e = new Error(msg); e.code = js.error && js.error.code; throw e;
+  }
+  return js.data;
+}
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/* theme engine — identical contract on every page.
+   Mansory preset engine: presets only write the same {primary, accent} hex
+   pair the theme contract has always used (values MUST stay 6-digit hex). */
+const THEME_DEFAULTS = { primary:'#d9b45b', accent:'#efdba8' };
+const THEME_PRESETS = [
+  { id:'mansory_gold', primary:'#d9b45b', accent:'#efdba8',
+    name:{en:'Mansory Carbon Gold',fa:'کربن طلایی منصوری'},
+    mood:{en:'luxury flagship',fa:'پرچم‌دار لوکس'} },
+  { id:'forged_acid', primary:'#a8e10c', accent:'#9aa8b5',
+    name:{en:'Forged Acid Green',fa:'اسیدیِ سبز فورج'},
+    mood:{en:'aggressive Mansory supercar',fa:'سوپراسپرت تهاجمی منصوری'} },
+  { id:'crimson_carbon', primary:'#f2504b', accent:'#ff9d4d',
+    name:{en:'Crimson Carbon',fa:'کربن سرخ'},
+    mood:{en:'dangerous performance',fa:'پرفورمنس خطرناک'} },
+  { id:'ice_titanium', primary:'#2ac9e8', accent:'#c7dbe6',
+    name:{en:'Ice Titanium',fa:'تیتانیوم یخی'},
+    mood:{en:'futuristic hypercar',fa:'هایپرکار آینده‌نگر'} },
+  { id:'royal_obsidian', primary:'#a57cff', accent:'#e3b341',
+    name:{en:'Royal Obsidian',fa:'ابسیدین سلطنتی'},
+    mood:{en:'exotic luxury night',fa:'شبِ لوکس و خاص'} },
+];
+const THEME_PRIMARIES = THEME_PRESETS.map(p => p.primary).concat('#e8ecf2');
+const THEME_ACCENTS   = THEME_PRESETS.map(p => p.accent).concat('#22d3a5');
+function applyPreset(p) { themeSet('primary', p.primary); themeSet('accent', p.accent); }
+function buildPresets() {
+  const host = document.getElementById('presetList');
+  if (!host) return;
+  const t = themeGet();
+  const curP = (t.primary || THEME_DEFAULTS.primary).toLowerCase();
+  const curA = (t.accent  || THEME_DEFAULTS.accent).toLowerCase();
+  host.innerHTML = THEME_PRESETS.map(p => {
+    const sel = p.primary === curP && p.accent === curA;
+    return '<button type="button" class="preset-card' + (sel ? ' selected' : '') + '" data-preset="' + p.id + '">' +
+      '<span class="preset-chips"><i style="background:' + p.primary + '"></i>' +
+      '<i style="background:' + p.accent + '"></i></span>' +
+      '<span class="preset-name">' + p.name[lang()] + '</span>' +
+      '<span class="preset-mood">' + p.mood[lang()] + '</span></button>';
+  }).join('');
+}
+(function(){ document.addEventListener('click', e => {
+  const b = e.target.closest('.preset-card[data-preset]');
+  if (!b) return;
+  const p = THEME_PRESETS.find(x => x.id === b.dataset.preset);
+  if (p) applyPreset(p);
+}); })();
+function themeGet() { try { return JSON.parse(localStorage.getItem('pfc_theme_v1') || '{}'); } catch (e) { return {}; } }
+function themeSet(key, val) {
+  const t = themeGet(); t[key] = val;
+  localStorage.setItem('pfc_theme_v1', JSON.stringify(t));
+  document.documentElement.style.setProperty('--' + key, val);
+  buildSwatches(); drawChart();
+}
+const FONT_SIZES = ['xs', 'sm', 'md', 'lg', 'xl'];
+function fontGet() { const v = localStorage.getItem('pfc_fontsize') || 'md'; return FONT_SIZES.includes(v) ? v : 'md'; }
+function setFontSize(v) {
+  if (!FONT_SIZES.includes(v)) v = 'md';
+  localStorage.setItem('pfc_fontsize', v);
+  document.documentElement.setAttribute('data-fontsize', v);
+  buildFontSeg();
+}
+function buildFontSeg() {
+  const cur = fontGet();
+  document.querySelectorAll('#fontSizeSeg button').forEach(b => b.classList.toggle('active', b.dataset.fs === cur));
+  const lbl = document.getElementById('fontSizeLabel');
+  if (lbl) lbl.textContent = (typeof L === 'function') ? L('fs_' + cur) : cur;
+}
+function buildSwatches() {
+  const t = themeGet();
+  const mk = (host, list, key, current) => {
+    host.innerHTML = '';
+    list.forEach(c => {
+      const d = document.createElement('div');
+      d.className = 'swatch' + (c.toLowerCase() === current ? ' selected' : '');
+      d.style.background = c;
+      d.onclick = () => themeSet(key, c);
+      host.appendChild(d);
+    });
+    const inp = document.createElement('input');
+    inp.type = 'color'; inp.className = 'color-input'; inp.value = current;
+    inp.oninput = e => themeSet(key, e.target.value);
+    host.appendChild(inp);
+  };
+  mk($('primarySwatches'), THEME_PRIMARIES, 'primary', (t.primary || THEME_DEFAULTS.primary).toLowerCase());
+  mk($('accentSwatches'), THEME_ACCENTS, 'accent', (t.accent || THEME_DEFAULTS.accent).toLowerCase());
+  buildPresets();                                        /* keep preset highlight in sync */
+}
+async function applyBranding() {
+  // Brand name + logo come from the server (env-configurable: PFC_APP_NAME / PFC_LOGO_PATH).
+  // Logo replaces the glyph tile; on any load error we fall back to the default mark.
+  try {
+    const res = await fetch('/api/branding');
+    const b = (await res.json()).data || {};
+    if (b.app_name) {
+      window.__brand = b.app_name;
+      document.querySelectorAll('[data-i18n="app_name"]').forEach(el => el.textContent = b.app_name);
+    }
+    if (b.logo_url) document.querySelectorAll('.brand-logo').forEach(el => {
+      const img = new Image();
+      img.src = b.logo_url; img.alt = 'logo';
+      img.style.cssText = 'width:64%;height:64%;object-fit:contain';
+      img.onerror = () => { el.textContent = '\u25C8'; };
+      el.textContent = ''; el.appendChild(img);
+    });
+  } catch (e) { /* keep glyph + i18n defaults */ }
+}
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = L(el.dataset.i18n); });
+  if (window.__brand) document.querySelectorAll('[data-i18n="app_name"]').forEach(el => { el.textContent = window.__brand; });
+  document.title = L('app_name') + ' — ' + L('nav_bitcoin');
+  buildPresets();                                        /* preset names are bilingual */
+}
+function setLang(l, persist) {
+  document.documentElement.lang = l;
+  document.documentElement.dir = l === 'fa' ? 'rtl' : 'ltr';
+  localStorage.setItem('pfc_lang', l);
+  $('langEn').classList.toggle('selected', l === 'en');
+  $('langFa').classList.toggle('selected', l === 'fa');
+  applyI18n(); render();
+  if (persist && S.profile) api('/api/profile', { method:'PUT', body:{ language: l } })
+    .then(p => S.profile = p).catch(() => {});
+}
+function openPanel() { $('settingsPanel').classList.add('open'); $('settingsBk').classList.add('open'); buildSwatches(); buildFontSeg(); }
+function closePanel() { $('settingsPanel').classList.remove('open'); $('settingsBk').classList.remove('open'); }
+function logout() {
+  api('/api/auth/logout', { method:'POST' }).catch(() => {});
+  localStorage.removeItem('pfc_token');
+  location.href = 'index.html';
+}
+async function pollBell() {
+  if (!S.token) return;
+  try {
+    const d = await api('/api/notifications/count');
+    const b = $('bellBadge');
+    b.textContent = d.unread > 99 ? '99+' : d.unread;
+    b.classList.toggle('hidden', d.unread === 0);
+    b.classList.toggle('pulse', d.unread > 0);
+  } catch (e) { /* silent */ }
+}
+
+/* ═════════════════ 3 · DATA LOAD ═════════════════ */
+async function load() {
+  try { S.history = await api('/api/btc/history?days=30'); }
+  catch (e) { toast(e.message, 'error'); return; }
+  try { S.forecast = await api('/api/btc/forecast'); }
+  catch (e) {
+    S.forecast = null;
+    if (e.code !== 'btc_unavailable') toast(e.message, 'error');
+  }
+  render();
+}
+
+/* ═════════════════ 4 · RENDER ═════════════════ */
+function srcLabel(src) {
+  if (!src) return '—';
+  if (src.endsWith('_stale')) return L('src_stale');
+  return L('src_' + src) !== 'src_' + src ? L('src_' + src) : src;
+}
+function render() {
+  if (!S.history) return;
+  const h = S.history, fc = S.forecast;
+
+  /* price hero */
+  $('priceBig').textContent = usd(h.latest_price);
+  $('srcTag').textContent = srcLabel(h.source);
+  const first = h.days[0].close, chg = (h.latest_price - first) / first * 100;
+  const chgEl = $('chg30');
+  chgEl.className = 'stat-delta ' + (chg >= 0 ? 'good' : 'up');
+  chgEl.textContent = (chg >= 0 ? '▲ ' : '▼ ') + pct(chg) + ' · ' + L('chg_30d');
+  $('asOf').textContent = L('as_of', { d: fmtDate(h.days[h.days.length - 1].date) });
+
+  /* signal + metrics + forecast widgets */
+  const hasModel = !!fc;
+  $('modelMissing').classList.toggle('hidden', hasModel);
+  $('forecastCard').classList.toggle('hidden', !hasModel);
+  $('baselineCard').classList.toggle('hidden', !hasModel || !fc.model_metrics.validation);
+  $('lgForecast').style.display = hasModel ? '' : 'none';
+  $('lgCone').style.display = hasModel ? '' : 'none';
+
+  if (hasModel) {
+    const sig = fc.signal, kind = sig.signal.toLowerCase();
+    const card = $('signalCard');
+    card.className = 'glass-card lift col-4 signal-card signal-' + kind;
+    $('sigArrow').textContent = kind === 'up' ? '▲' : kind === 'down' ? '▼' : '●';
+    $('sigLabel').textContent = L('sig_' + kind);
+    $('sigMove').textContent = L('move_line', { m: pct(sig.expected_move_pct), u: nf(sig.uncertainty_pct, 1) });
+    $('confPct').textContent = nf(sig.confidence * 100, 0) + (lang() === 'fa' ? '٪' : '%');
+    $('confFill').style.width = (sig.confidence * 100) + '%';
+    $('sigAdvice').textContent = L('advice_' + kind);
+
+    /* reliability metrics */
+    const mm = fc.model_metrics || {};
+    const bl = mm.validation || {};
+    const model = bl['LSTM model'] || {};
+    $('mHit').textContent = mm.final_test_acting_hit_rate_pct != null
+      ? nf(mm.final_test_acting_hit_rate_pct, 1) + '%' : '—';
+    $('mDir1').textContent = model.dir_h1 != null ? nf(model.dir_h1, 1) + '%' : '—';
+    $('mDir10').textContent = model.dir_h10 != null ? nf(model.dir_h10, 1) + '%' : '—';
+    $('mMape').textContent = model.MAPE_h10 != null ? nf(model.MAPE_h10, 1) + '%' : '—';
+
+    /* forecast table */
+    $('fcRows').innerHTML = fc.forecast.map(r =>
+      '<tr><td>' + fmtDate(r.date) + '</td><td class="money">' + usd(r.price) + '</td>' +
+      '<td class="' + (r.cum_move_pct >= 0 ? 'success' : 'danger') + '">' + pct(r.cum_move_pct) + '</td></tr>').join('');
+
+    /* commentary — grounded in the signal object, bilingual */
+    $('commentary').textContent = L('commentary_' + kind, {
+      m: pct(sig.expected_move_pct), u: nf(sig.uncertainty_pct, 1),
+      c: nf(sig.confidence * 100, 0),
+      h: mm.final_test_acting_hit_rate_pct != null ? nf(mm.final_test_acting_hit_rate_pct, 1) : '—' });
+
+    /* baseline transparency table */
+    if (bl['LSTM model']) {
+      const rows = [['bl_model', 'LSTM model', true], ['bl_persist', 'persistence (flat)', false],
+                    ['bl_drift', 'drift (60d mean)', false], ['bl_alwaysup', 'always-up (direction base rate)', false]];
+      const cell = (v, suffix) => v == null || Number.isNaN(v) ? '—' : nf(v, 1) + (suffix || '%');
+      $('blRows').innerHTML = rows.filter(([, key]) => bl[key]).map(([label, key, isModel]) => {
+        const b = bl[key];
+        return '<tr class="' + (isModel ? 'is-model' : '') + '"><td>' + L(label) + '</td>' +
+          '<td>' + cell(b.MAPE_h1) + '</td><td>' + cell(b.MAPE_h10) + '</td>' +
+          '<td>' + cell(b.dir_h1) + '</td><td>' + cell(b.dir_h10) + '</td></tr>';
+      }).join('');
+    }
+  }
+  drawChart();
+}
+
+/* ═════════════════ 5 · CHART (canvas, DPR-aware, RTL-aware) ═════════════════ */
+function drawChart() {
+  const cv = $('chartCanvas');
+  if (!S.history || !cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.parentElement.clientWidth || 600, H = 300;
+  cv.style.width = '100%'; cv.style.height = H + 'px';
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const rtl = document.documentElement.dir === 'rtl';
+  const hist = S.history.days;
+  const fc = S.forecast ? S.forecast.forecast : [];
+  const unc = S.forecast ? S.forecast.signal.uncertainty_pct / 100 : 0;
+
+  /* series: history closes then forecast prices; cone widens with sqrt(horizon) */
+  const pts = hist.map(d => ({ v: d.close, kind: 'h', date: d.date }))
+    .concat(fc.map((r, i) => ({ v: r.price, kind: 'f', date: r.date,
+      lo: r.price * (1 - unc * Math.sqrt((i + 1) / fc.length)),
+      hi: r.price * (1 + unc * Math.sqrt((i + 1) / fc.length)) })));
+  const lows = pts.map(p => p.lo != null ? p.lo : p.v);
+  const his  = pts.map(p => p.hi != null ? p.hi : p.v);
+  const vMin = Math.min(...lows), vMax = Math.max(...his);
+  const padV = (vMax - vMin) * 0.08 || vMax * 0.01;
+  const yMin = vMin - padV, yMax = vMax + padV;
+
+  const pad = { l: rtl ? 14 : 64, r: rtl ? 64 : 14, t: 12, b: 26 };
+  const X = i => {
+    const t = i / (pts.length - 1);
+    return rtl ? W - pad.r - t * (W - pad.l - pad.r) : pad.l + t * (W - pad.l - pad.r);
+  };
+  const Y = v => pad.t + (1 - (v - yMin) / (yMax - yMin)) * (H - pad.t - pad.b);
+
+  const primary = cssVar('--primary'), accent = cssVar('--accent'),
+        faint = cssVar('--ink-faint'), font = getComputedStyle(document.body).fontFamily;
+
+  /* horizontal gridlines + price labels */
+  ctx.font = '11px ' + font;
+  ctx.textBaseline = 'middle';
+  for (let g = 0; g <= 3; g++) {
+    const v = yMin + (yMax - yMin) * g / 3, y = Y(v);
+    ctx.strokeStyle = 'rgba(255,255,255,0.055)';
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillStyle = faint;
+    ctx.textAlign = rtl ? 'left' : 'right';
+    ctx.fillText(usd(v), rtl ? W - pad.r + 8 : pad.l - 8, y);
+  }
+
+  const histEnd = hist.length - 1;
+
+  /* uncertainty cone */
+  if (fc.length) {
+    ctx.beginPath();
+    ctx.moveTo(X(histEnd), Y(pts[histEnd].v));
+    for (let i = histEnd + 1; i < pts.length; i++) ctx.lineTo(X(i), Y(pts[i].hi));
+    for (let i = pts.length - 1; i > histEnd; i--) ctx.lineTo(X(i), Y(pts[i].lo));
+    ctx.closePath();
+    ctx.fillStyle = accent + '24';
+    ctx.fill();
+  }
+
+  /* history area fill + line */
+  ctx.beginPath();
+  pts.slice(0, histEnd + 1).forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.v)) : ctx.moveTo(X(0), Y(p.v)));
+  const areaGrad = ctx.createLinearGradient(0, pad.t, 0, H - pad.b);
+  areaGrad.addColorStop(0, primary + '3a'); areaGrad.addColorStop(1, primary + '05');
+  ctx.save();
+  ctx.lineTo(X(histEnd), H - pad.b); ctx.lineTo(X(0), H - pad.b); ctx.closePath();
+  ctx.fillStyle = areaGrad; ctx.fill();
+  ctx.restore();
+  ctx.beginPath();
+  pts.slice(0, histEnd + 1).forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.v)) : ctx.moveTo(X(0), Y(p.v)));
+  ctx.strokeStyle = primary; ctx.lineWidth = 2.4; ctx.lineJoin = 'round'; ctx.stroke();
+
+  /* forecast dashed line + endpoint dot */
+  if (fc.length) {
+    ctx.beginPath();
+    ctx.setLineDash([7, 5]);
+    ctx.moveTo(X(histEnd), Y(pts[histEnd].v));
+    for (let i = histEnd + 1; i < pts.length; i++) ctx.lineTo(X(i), Y(pts[i].v));
+    ctx.strokeStyle = accent; ctx.lineWidth = 2.4; ctx.stroke();
+    ctx.setLineDash([]);
+    const last = pts.length - 1;
+    ctx.beginPath(); ctx.arc(X(last), Y(pts[last].v), 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = accent; ctx.fill();
+
+    /* today divider */
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath(); ctx.moveTo(X(histEnd), pad.t); ctx.lineTo(X(histEnd), H - pad.b); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = faint; ctx.textAlign = 'center';
+    ctx.fillText(L('today_marker'), X(histEnd), H - 9);
+  }
+
+  /* first / last date labels */
+  ctx.fillStyle = faint;
+  ctx.textAlign = rtl ? 'right' : 'left';
+  ctx.fillText(fmtDate(pts[0].date), rtl ? W - pad.r : pad.l, H - 9);
+  ctx.textAlign = rtl ? 'left' : 'right';
+  ctx.fillText(fmtDate(pts[pts.length - 1].date), rtl ? pad.l : W - pad.r, H - 9);
+}
+
+/* ═════════════════ 6 · WIRING & BOOT ═════════════════ */
+$('settingsBtn').addEventListener('click', openPanel);
+(function(){ const seg = $('fontSizeSeg'); if (seg) seg.addEventListener('click', e => {
+  const b = e.target.closest('button[data-fs]'); if (b) setFontSize(b.dataset.fs); }); buildFontSeg(); })();
+$('settingsClose').addEventListener('click', closePanel);
+$('settingsBk').addEventListener('click', closePanel);
+$('langEn').addEventListener('click', () => setLang('en', true));
+$('langFa').addEventListener('click', () => setLang('fa', true));
+$('logoutBtn').addEventListener('click', logout);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+let resizeT;
+window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(drawChart, 180); });
+window.addEventListener('focus', pollBell);
+
+applyBranding();
+(async function boot() {
+  applyI18n();
+  if (!S.token) { location.href = 'index.html'; return; }
+  try { S.profile = await api('/api/profile'); }
+  catch (e) { return; }                            /* api() already redirected on auth_required */
+  $('userName').textContent = S.profile.username;
+  $('userAvatar').textContent = (S.profile.username[0] || '?').toUpperCase();
+  $('accCountry').textContent = S.profile.country === 'IR' ? '🇮🇷 ایران' : '🇺🇸 USA';
+  $('accUser').textContent = '@' + S.profile.username;
+  if (S.profile.language !== lang()) setLang(S.profile.language, false); else setLang(lang(), false);
+  pollBell(); setInterval(pollBell, 15000);
+  await load();
+  setInterval(load, 300000);                       /* refresh prices every 5 min */
+})();
+</script>
+</body>
+</html>
