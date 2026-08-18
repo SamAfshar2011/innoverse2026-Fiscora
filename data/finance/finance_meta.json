@@ -1,0 +1,67 @@
+{
+  "model_name": "financa_behaviour_lstm",
+  "created_at": "2026-07-07T16:46:54.205385+00:00",
+  "tensorflow_version": "2.16.2",
+  "smoke_run": false,
+  "lookback": 6,
+  "n_features": 22,
+  "feature_names": [
+    "spend_income",
+    "budget_util",
+    "savings_rate",
+    "spend_growth",
+    "weekend_ratio",
+    "largest_ratio",
+    "log_ntxn",
+    "crypto_intensity",
+    "crypto_txn",
+    "month_sin",
+    "month_cos",
+    "share_food_dining",
+    "share_groceries",
+    "share_transport",
+    "share_housing_utilities",
+    "share_health",
+    "share_entertainment",
+    "share_shopping",
+    "share_education",
+    "share_subscriptions",
+    "share_transfers",
+    "share_other"
+  ],
+  "spend_cats": [
+    "food_dining",
+    "groceries",
+    "transport",
+    "housing_utilities",
+    "health",
+    "entertainment",
+    "shopping",
+    "education",
+    "subscriptions",
+    "transfers",
+    "other"
+  ],
+  "reg_mean": -0.00034487704397179186,
+  "reg_std": 0.3740210037095642,
+  "tasks": {
+    "regression": "log(next_spend / current_spend)",
+    "classification": "P(next_spend > next_budget)"
+  },
+  "metrics": {
+    "reg_loggrowth_mae": 0.1887,
+    "reg_loggrowth_mae_baseline": 0.2571,
+    "reg_spendratio_mae": 0.2014,
+    "reg_spendratio_mae_baseline": 0.2728,
+    "cls_accuracy": 0.7141,
+    "cls_majority_baseline": 0.6579,
+    "cls_auc": 0.7595,
+    "val_overspend_rate": 0.6579
+  },
+  "best_epoch": 9,
+  "n_train_seq": 17280,
+  "n_val_seq": 4320,
+  "caveats": [
+    "Trained on a synthetic-but-coherent behaviour panel; treat as decision support. Features are currency-invariant so the same model serves USD & Toman users — the server multiplies the predicted growth factor by the user's real spend."
+  ]
+}
