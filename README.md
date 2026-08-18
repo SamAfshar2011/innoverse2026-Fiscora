@@ -1,4 +1,3 @@
-````markdown
 <div align="center">
 
 # Fiscora
@@ -1297,4 +1296,3 @@ Fiscora does not execute trades, guarantee profits, guarantee savings, or determ
 **Financial data is useful. Financial context is more useful.**
 
 </div>
-````
