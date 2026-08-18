@@ -1,1 +1,285 @@
-
+{
+  "model_name": "btc_multihorizon_lstm",
+  "created_at": "2026-08-16T06:33:56.375154+00:00",
+  "tensorflow_version": "2.16.2",
+  "seed": 42,
+  "config": {
+    "train_csv": "datasets/btc/btc.csv",
+    "test_csv": "datasets/btc/btc_test.csv",
+    "artifacts_dir": "data/btc",
+    "val_end_date": "2025-06-27",
+    "lookback": 60,
+    "horizon": 10,
+    "zero_era_run": 30,
+    "max_gap_days": 2,
+    "target_clip_pct": [
+      0.5,
+      99.5
+    ],
+    "conv_filters": 48,
+    "lstm1": 96,
+    "lstm2": 48,
+    "dense": 48,
+    "dropout": 0.25,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "batch_size": 64,
+    "max_epochs": 200,
+    "patience_early_stop": 50,
+    "patience_reduce_lr": 6
+  },
+  "feature_names": [
+    "log_ret",
+    "hl_range",
+    "close_pos",
+    "log_vol_chg",
+    "vol_ratio",
+    "volat_7",
+    "volat_14",
+    "volat_30",
+    "rsi_14",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "bb_pctb",
+    "close_sma7",
+    "close_sma21",
+    "close_sma50",
+    "roc_7",
+    "roc_14",
+    "dow_sin",
+    "dow_cos"
+  ],
+  "data": {
+    "clean_rows": 5661,
+    "clean_range": [
+      "2013-12-27",
+      "2029-06-26"
+    ],
+    "train_last_date": "2024-06-27",
+    "validation_range": [
+      "2024-06-28",
+      "2025-06-27"
+    ],
+    "samples": {
+      "train": 3718,
+      "val": 356,
+      "test": 1451
+    },
+    "target_clip_bounds": [
+      -0.13254607707196897,
+      0.12207611926667006
+    ]
+  },
+  "training": {
+    "best_epoch": 3,
+    "best_val_loss": 0.3165668249130249,
+    "epochs_ran": 53
+  },
+  "validation_metrics": {
+    "n_forecasts": 356,
+    "period": [
+      "2024-06-27",
+      "2025-06-17"
+    ],
+    "per_horizon": {
+      "day +1": {
+        "RMSE $": 2406.5584,
+        "MAE $": 1882.7865,
+        "MAPE %": 2.2806,
+        "dir_acc %": 49.7191
+      },
+      "day +2": {
+        "RMSE $": 3511.4025,
+        "MAE $": 2738.2214,
+        "MAPE %": 3.3328,
+        "dir_acc %": 53.0899
+      },
+      "day +3": {
+        "RMSE $": 4333.0192,
+        "MAE $": 3378.4939,
+        "MAPE %": 4.1056,
+        "dir_acc %": 51.6854
+      },
+      "day +4": {
+        "RMSE $": 5053.6329,
+        "MAE $": 3942.8656,
+        "MAPE %": 4.7972,
+        "dir_acc %": 50.0
+      },
+      "day +5": {
+        "RMSE $": 5651.9953,
+        "MAE $": 4411.4593,
+        "MAPE %": 5.3682,
+        "dir_acc %": 51.9663
+      },
+      "day +6": {
+        "RMSE $": 6189.0098,
+        "MAE $": 4880.7594,
+        "MAPE %": 5.9574,
+        "dir_acc %": 46.6292
+      },
+      "day +7": {
+        "RMSE $": 6618.9389,
+        "MAE $": 5239.9267,
+        "MAPE %": 6.421,
+        "dir_acc %": 51.4045
+      },
+      "day +8": {
+        "RMSE $": 6978.4509,
+        "MAE $": 5502.3985,
+        "MAPE %": 6.7436,
+        "dir_acc %": 55.8989
+      },
+      "day +9": {
+        "RMSE $": 7341.0871,
+        "MAE $": 5846.6734,
+        "MAPE %": 7.1473,
+        "dir_acc %": 57.8652
+      },
+      "day +10": {
+        "RMSE $": 7675.9983,
+        "MAE $": 6142.3129,
+        "MAPE %": 7.5172,
+        "dir_acc %": 59.8315
+      }
+    },
+    "vs_baselines": {
+      "LSTM model": {
+        "MAPE_h1": 2.2806,
+        "MAPE_h10": 7.5172,
+        "dir_h1": 49.7191,
+        "dir_h10": 59.8315
+      },
+      "persistence (flat)": {
+        "MAPE_h1": 2.2772,
+        "MAPE_h10": 7.5392,
+        "dir_h1": null,
+        "dir_h10": null
+      },
+      "drift (60d mean)": {
+        "MAPE_h1": 2.2786,
+        "MAPE_h10": 7.7258,
+        "dir_h1": 53.6517,
+        "dir_h10": 60.3933
+      },
+      "always-up (direction base rate)": {
+        "MAPE_h1": 2.2772,
+        "MAPE_h10": 7.5392,
+        "dir_h1": 50.8427,
+        "dir_h10": 54.2135
+      }
+    }
+  },
+  "final_test_metrics": {
+    "n_forecasts": 1451,
+    "period": [
+      "2025-06-27",
+      "2029-06-16"
+    ],
+    "per_horizon": {
+      "day +1": {
+        "RMSE $": 1329.9649,
+        "MAE $": 806.4017,
+        "MAPE %": 2.0323,
+        "dir_acc %": 48.7939
+      },
+      "day +2": {
+        "RMSE $": 1915.2223,
+        "MAE $": 1171.9927,
+        "MAPE %": 2.9562,
+        "dir_acc %": 50.448
+      },
+      "day +3": {
+        "RMSE $": 2329.1956,
+        "MAE $": 1449.5606,
+        "MAPE %": 3.6881,
+        "dir_acc %": 51.1371
+      },
+      "day +4": {
+        "RMSE $": 2715.2731,
+        "MAE $": 1680.6683,
+        "MAPE %": 4.2912,
+        "dir_acc %": 51.6196
+      },
+      "day +5": {
+        "RMSE $": 3087.6139,
+        "MAE $": 1896.8085,
+        "MAPE %": 4.8446,
+        "dir_acc %": 51.2061
+      },
+      "day +6": {
+        "RMSE $": 3405.276,
+        "MAE $": 2081.1322,
+        "MAPE %": 5.3094,
+        "dir_acc %": 51.4817
+      },
+      "day +7": {
+        "RMSE $": 3664.1594,
+        "MAE $": 2220.328,
+        "MAPE %": 5.6703,
+        "dir_acc %": 50.7926
+      },
+      "day +8": {
+        "RMSE $": 3928.6947,
+        "MAE $": 2390.9367,
+        "MAPE %": 6.1406,
+        "dir_acc %": 50.5169
+      },
+      "day +9": {
+        "RMSE $": 4176.6745,
+        "MAE $": 2545.3979,
+        "MAPE %": 6.5536,
+        "dir_acc %": 49.8277
+      },
+      "day +10": {
+        "RMSE $": 4423.3328,
+        "MAE $": 2696.8005,
+        "MAPE %": 6.9495,
+        "dir_acc %": 50.3101
+      }
+    },
+    "vs_baselines": {
+      "LSTM model": {
+        "MAPE_h1": 2.0323,
+        "MAPE_h10": 6.9495,
+        "dir_h1": 48.7939,
+        "dir_h10": 50.3101
+      },
+      "persistence (flat)": {
+        "MAPE_h1": 2.0131,
+        "MAPE_h10": 6.6738,
+        "dir_h1": null,
+        "dir_h10": null
+      },
+      "drift (60d mean)": {
+        "MAPE_h1": 2.035,
+        "MAPE_h10": 7.2785,
+        "dir_h1": 51.4128,
+        "dir_h10": 53.4114
+      },
+      "always-up (direction base rate)": {
+        "MAPE_h1": 2.0131,
+        "MAPE_h10": 6.6738,
+        "dir_h1": 49.621,
+        "dir_h10": 50.7926
+      }
+    }
+  },
+  "signal_calibration": {
+    "move_threshold_log_return": 0.005488530674483627,
+    "cum10_error_std_log_return": 0.09320175208102473,
+    "final_test_acting_hit_rate_pct": 50.93228655544652,
+    "final_test_majority_base_rate_pct": 50.79255685733977,
+    "final_test_signal_counts": {
+      "UP": 925,
+      "HOLD": 432,
+      "DOWN": 94
+    }
+  },
+  "caveats": [
+    "Daily BTC returns are close to a random walk; this model provides decision support with quantified uncertainty, not price prediction.",
+    "The test file's 2024-2029 dates are a synthetic future series; final-test metrics measure generalization to a simulated regime.",
+    "Signals are informational only and must be displayed with the uncertainty band and a not-financial-advice disclaimer."
+  ]
+}
